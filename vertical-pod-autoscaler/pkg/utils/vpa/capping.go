@@ -18,6 +18,7 @@ package api
 
 import (
 	"fmt"
+	"slices"
 
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -533,5 +534,62 @@ func (c *cappingRecommendationProcessor) capProportionallyToPodLimitRange(
 
 	containerRecommendations = applyPodLimitRange(containerRecommendations, pod, *podLimitRange, apiv1.ResourceCPU, getLower)
 	containerRecommendations = applyPodLimitRange(containerRecommendations, pod, *podLimitRange, apiv1.ResourceMemory, getLower)
+
+	containerRecommendations = normalizeCointainerRecommendations(containerRecommendations, pod, apiv1.ResourceCPU, getTarget, getLower)
+	containerRecommendations = normalizeCointainerRecommendations(containerRecommendations, pod, apiv1.ResourceMemory, getTarget, getLower)
+
+	containerRecommendations = normalizeCointainerRecommendations(containerRecommendations, pod, apiv1.ResourceCPU, getUpper, getTarget)
+	containerRecommendations = normalizeCointainerRecommendations(containerRecommendations, pod, apiv1.ResourceMemory, getUpper, getTarget)
+
 	return containerRecommendations, nil
+}
+
+// normalizeContainerRecommendations does the following for each container in the VPA object:
+// 1. Check if current >= floor holds true
+// if there is a violation for a container then set current's value to the floor
+// for other containers proportionally adjust their recommendations (i.e. current) so that the total sum remains unchanged.
+func normalizeCointainerRecommendations(resources []vpa_types.RecommendedContainerResources, pod *apiv1.Pod, resourceName apiv1.ResourceName,
+	fieldGetterCurrent func(vpa_types.RecommendedContainerResources) *apiv1.ResourceList, fieldGetterFloor func(vpa_types.RecommendedContainerResources) *apiv1.ResourceList) []vpa_types.RecommendedContainerResources {
+
+	fixBoundaries := false
+
+	containers := []string{}
+	max, violatedMax := resource.Quantity{}, resource.Quantity{}
+	totalRoom := resource.Quantity{}
+	// use zipContainersWithRecommendations to drop stale recommendations for deleted containers
+	containersWithRecommendations := zipContainersWithRecommendations(resources, pod)
+	for _, containerWithRecommendation := range containersWithRecommendations {
+		current := (*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName]
+		max.Add(current)
+		floor := (*fieldGetterFloor(*containerWithRecommendation.recommendation))[resourceName]
+		if current.Cmp(floor) < 0 { // violated, use the floor
+			violatedMax.Add(floor)
+			(*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName] = floor
+			fixBoundaries = true
+		} else {
+			violatedMax.Add(current)
+			totalRoom.Add(current)
+			containers = append(containers, containerWithRecommendation.container.Name)
+		}
+	}
+
+	if fixBoundaries {
+		redistribute := violatedMax.DeepCopy()
+		redistribute.Sub(max)
+		for _, containerWithRecommendation := range containersWithRecommendations {
+			if slices.Contains(containers, containerWithRecommendation.container.Name) {
+				current := (*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName]
+				var value *resource.Quantity
+				if resourceName == apiv1.ResourceMemory {
+					value, _ = scaleQuantityProportionallyMem(&redistribute, &totalRoom, &current, roundDownToFullUnit)
+				} else {
+					value, _ = scaleQuantityProportionallyCPU(&redistribute, &totalRoom, &current, noRounding)
+				}
+				cappedContainerRequest := current.DeepCopy()
+				cappedContainerRequest.Sub(*value)
+				(*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName] = cappedContainerRequest
+			}
+		}
+	}
+	return resources
 }
