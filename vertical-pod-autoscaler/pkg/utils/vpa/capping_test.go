@@ -27,124 +27,6 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/test"
 )
 
-// func TestCapProportionallyToPodLimitRange(t *testing.T) {
-// 	tests := []struct {
-// 		name          string
-// 		resources     []vpa_types.RecommendedContainerResources
-// 		pod           apiv1.Pod
-// 		podLimitRange apiv1.LimitRangeItem
-// 		resourceName  apiv1.ResourceName
-// 		expect        []vpa_types.RecommendedContainerResources
-// 	}{
-// 		{
-// 			name: "test Lower ≤ Target ≤ Upper after capping",
-// 			resources: []vpa_types.RecommendedContainerResources{
-// 				{
-// 					ContainerName: "container1",
-// 					LowerBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("100m"),
-// 					},
-// 					Target: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("200m"),
-// 					},
-// 					UpperBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("200m"),
-// 					},
-// 				},
-// 				{
-// 					ContainerName: "container2",
-// 					LowerBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("20m"),
-// 					},
-// 					Target: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("20m"),
-// 					},
-// 					UpperBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("20m"),
-// 					},
-// 				},
-// 			},
-// 			pod: apiv1.Pod{
-// 				Spec: apiv1.PodSpec{
-// 					Containers: []apiv1.Container{
-// 						{
-// 							Name: "container1",
-// 							Resources: apiv1.ResourceRequirements{
-// 								Requests: apiv1.ResourceList{
-// 									apiv1.ResourceCPU: resource.MustParse("20m"),
-// 								},
-// 								Limits: apiv1.ResourceList{
-// 									apiv1.ResourceCPU: resource.MustParse("40m"),
-// 								},
-// 							},
-// 						},
-// 						{
-// 							Name: "container2",
-// 							Resources: apiv1.ResourceRequirements{
-// 								Requests: apiv1.ResourceList{
-// 									apiv1.ResourceCPU: resource.MustParse("20m"),
-// 								},
-// 								Limits: apiv1.ResourceList{
-// 									apiv1.ResourceCPU: resource.MustParse("40m"),
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			podLimitRange: apiv1.LimitRangeItem{
-// 				Max: apiv1.ResourceList{
-// 					apiv1.ResourceCPU: resource.MustParse("350m"),
-// 					//apiv1.ResourceCPU: resource.MustParse("1350m"),
-// 				},
-// 				Type: apiv1.LimitTypePod,
-// 			},
-// 			resourceName: apiv1.ResourceCPU,
-// 			expect: []vpa_types.RecommendedContainerResources{
-// 				{
-// 					ContainerName: "container1",
-// 					LowerBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("100m"),
-// 					},
-// 					Target: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: *resource.NewScaledQuantity(154, -3),
-// 					},
-// 					UpperBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: *resource.NewScaledQuantity(154, -3),
-// 						//apiv1.ResourceCPU: resource.MustParse("200m"),
-// 					},
-// 				},
-// 				{
-// 					ContainerName: "container2",
-// 					LowerBound: apiv1.ResourceList{
-// 						apiv1.ResourceCPU: resource.MustParse("20m"),
-// 					},
-// 					Target: apiv1.ResourceList{
-// 						//apiv1.ResourceCPU: *resource.NewScaledQuantity(15, -3),
-// 						apiv1.ResourceCPU: resource.MustParse("20m"),
-// 					},
-// 					UpperBound: apiv1.ResourceList{
-// 						//apiv1.ResourceCPU: *resource.NewScaledQuantity(15, -3),
-// 						apiv1.ResourceCPU: resource.MustParse("20m"),
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
-// 	for _, tc := range tests {
-// 		t.Run(tc.name, func(t *testing.T) {
-// 			calculator := &fakeLimitRangeCalculator{
-// 				podLimitRange: tc.podLimitRange,
-// 			}
-// 			c := cappingRecommendationProcessor{
-// 				limitsRangeCalculator: calculator,
-// 			}
-// 			got, _ := c.capProportionallyToPodLimitRange(tc.resources, &tc.pod)
-// 			assert.Equal(t, tc.expect, got)
-// 		})
-// 	}
-// }
-
 var getTarget = func(rl vpa_types.RecommendedContainerResources) *apiv1.ResourceList { return &rl.Target }
 var getUpper = func(rl vpa_types.RecommendedContainerResources) *apiv1.ResourceList { return &rl.UpperBound }
 var getLower = func(rl vpa_types.RecommendedContainerResources) *apiv1.ResourceList { return &rl.LowerBound }
@@ -220,6 +102,107 @@ func TestNormalizeCointainerRecommendations(t *testing.T) {
 				},
 				{
 					ContainerName: "container2",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("20m"),
+					},
+					UpperBound: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("20m"),
+					},
+				},
+			},
+		},
+		{
+			name: "fix violation in container2 and container3 recommendations, lower container1 UpperBound",
+			resources: []vpa_types.RecommendedContainerResources{
+				{
+					ContainerName: "container1",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("100m"),
+					},
+					UpperBound: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("200m"),
+					},
+				},
+				{
+					ContainerName: "container2",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("20m"),
+					},
+					UpperBound: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("15m"),
+					},
+				},
+				{
+					ContainerName: "container3",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("20m"),
+					},
+					UpperBound: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("15m"),
+					},
+				},
+			},
+			pod: apiv1.Pod{
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name: "container1",
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1"),
+								},
+								Limits: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("2"),
+								},
+							},
+						},
+						{
+							Name: "container2",
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1"),
+								},
+								Limits: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("2"),
+								},
+							},
+						},
+						{
+							Name: "container3",
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1"),
+								},
+								Limits: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("2"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceName: apiv1.ResourceCPU,
+			expect: []vpa_types.RecommendedContainerResources{
+				{
+					ContainerName: "container1",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("100m"),
+					},
+					UpperBound: apiv1.ResourceList{
+						apiv1.ResourceCPU: *resource.NewScaledQuantity(190, -3),
+					},
+				},
+				{
+					ContainerName: "container2",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("20m"),
+					},
+					UpperBound: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("20m"),
+					},
+				},
+				{
+					ContainerName: "container3",
 					Target: apiv1.ResourceList{
 						apiv1.ResourceCPU: resource.MustParse("20m"),
 					},
@@ -1016,6 +999,71 @@ func TestApplyPodLimitRange(t *testing.T) {
 		resourceName apiv1.ResourceName
 		expect       []vpa_types.RecommendedContainerResources
 	}{
+		{
+			name: "zili1",
+			resources: []vpa_types.RecommendedContainerResources{
+				{
+					ContainerName: "container1",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("15m"),
+					},
+				},
+				{
+					ContainerName: "container2",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: resource.MustParse("100m"),
+					},
+				},
+			},
+			pod: apiv1.Pod{
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name: "container1",
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1m"),
+								},
+								Limits: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1m"),
+								},
+							},
+						},
+						{
+							Name: "container2",
+							Resources: apiv1.ResourceRequirements{
+								Requests: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1m"),
+								},
+								Limits: apiv1.ResourceList{
+									apiv1.ResourceCPU: resource.MustParse("1m"),
+								},
+							},
+						},
+					},
+				},
+			},
+			limitRange: apiv1.LimitRangeItem{
+				Min: apiv1.ResourceList{
+					apiv1.ResourceCPU: resource.MustParse("150m"),
+				},
+			},
+			resourceName: apiv1.ResourceCPU,
+			expect: []vpa_types.RecommendedContainerResources{
+				{
+					ContainerName: "container1",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: *resource.NewMilliQuantity(500, resource.DecimalSI),
+					},
+				},
+				{
+					ContainerName: "container2",
+					Target: apiv1.ResourceList{
+						apiv1.ResourceCPU: *resource.NewMilliQuantity(500, resource.DecimalSI),
+					},
+				},
+			},
+		},
 		{
 			name: "cap target cpu to max",
 			resources: []vpa_types.RecommendedContainerResources{

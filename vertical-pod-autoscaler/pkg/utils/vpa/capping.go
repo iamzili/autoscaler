@@ -549,46 +549,47 @@ func (c *cappingRecommendationProcessor) capProportionallyToPodLimitRange(
 // if there is a violation for a container then set current's value to the floor
 // for other containers proportionally adjust their recommendations (i.e. current) so that the total sum remains unchanged.
 func normalizeCointainerRecommendations(resources []vpa_types.RecommendedContainerResources, pod *apiv1.Pod, resourceName apiv1.ResourceName,
-	fieldGetterCurrent func(vpa_types.RecommendedContainerResources) *apiv1.ResourceList, fieldGetterFloor func(vpa_types.RecommendedContainerResources) *apiv1.ResourceList) []vpa_types.RecommendedContainerResources {
+	fieldGetterRecommendation func(vpa_types.RecommendedContainerResources) *apiv1.ResourceList, fieldGetterFloor func(vpa_types.RecommendedContainerResources) *apiv1.ResourceList) []vpa_types.RecommendedContainerResources {
 
 	fixBoundaries := false
 
 	containers := []string{}
-	max, violatedMax := resource.Quantity{}, resource.Quantity{}
-	totalRoom := resource.Quantity{}
-	// use zipContainersWithRecommendations to drop stale recommendations for deleted containers
+	sumValidRecommendation, redistribute := resource.Quantity{}, resource.Quantity{}
+	// use zipContainersWithRecommendations to ignore stale recommendations
 	containersWithRecommendations := zipContainersWithRecommendations(resources, pod)
 	for _, containerWithRecommendation := range containersWithRecommendations {
-		current := (*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName]
-		max.Add(current)
+		recommendation := (*fieldGetterRecommendation(*containerWithRecommendation.recommendation))[resourceName]
 		floor := (*fieldGetterFloor(*containerWithRecommendation.recommendation))[resourceName]
-		if current.Cmp(floor) < 0 { // violated, use the floor
-			violatedMax.Add(floor)
-			(*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName] = floor
+		// if bounds violated, use the floor instead of the current recommendation
+		if recommendation.Cmp(floor) < 0 {
+			value := floor.DeepCopy()
+			value.Sub(recommendation)
+			redistribute.Add(value)
+			(*fieldGetterRecommendation(*containerWithRecommendation.recommendation))[resourceName] = floor
 			fixBoundaries = true
 		} else {
-			violatedMax.Add(current)
-			totalRoom.Add(current)
+			// recommendations need to be adjusted proportionally based on their current recommendations
 			containers = append(containers, containerWithRecommendation.container.Name)
+			sumValidRecommendation.Add(recommendation)
 		}
 	}
 
 	if fixBoundaries {
-		redistribute := violatedMax.DeepCopy()
-		redistribute.Sub(max)
 		for _, containerWithRecommendation := range containersWithRecommendations {
-			if slices.Contains(containers, containerWithRecommendation.container.Name) {
-				current := (*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName]
-				var value *resource.Quantity
-				if resourceName == apiv1.ResourceMemory {
-					value, _ = scaleQuantityProportionallyMem(&redistribute, &totalRoom, &current, roundDownToFullUnit)
-				} else {
-					value, _ = scaleQuantityProportionallyCPU(&redistribute, &totalRoom, &current, noRounding)
-				}
-				cappedContainerRequest := current.DeepCopy()
-				cappedContainerRequest.Sub(*value)
-				(*fieldGetterCurrent(*containerWithRecommendation.recommendation))[resourceName] = cappedContainerRequest
+			if !slices.Contains(containers, containerWithRecommendation.container.Name) {
+				continue
 			}
+			recommendation := (*fieldGetterRecommendation(*containerWithRecommendation.recommendation))[resourceName]
+			var value *resource.Quantity
+			if resourceName == apiv1.ResourceMemory {
+				value, _ = scaleQuantityProportionallyMem(&redistribute, &sumValidRecommendation, &recommendation, roundDownToFullUnit)
+			} else {
+				value, _ = scaleQuantityProportionallyCPU(&redistribute, &sumValidRecommendation, &recommendation, noRounding)
+			}
+			fmt.Println("for container ", containerWithRecommendation.container.Name, "redistributing", value.String())
+			cappedContainerRequest := recommendation.DeepCopy()
+			cappedContainerRequest.Sub(*value)
+			(*fieldGetterRecommendation(*containerWithRecommendation.recommendation))[resourceName] = cappedContainerRequest
 		}
 	}
 	return resources
