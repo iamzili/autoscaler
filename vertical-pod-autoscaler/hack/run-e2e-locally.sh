@@ -72,26 +72,26 @@ then
 fi
 
 # Clean up before exit
-function cleanup {
-  echo " ** Cleaning up..."
-  helm uninstall vpa --namespace kube-system 2>/dev/null || true
-  kubectl delete namespace monitoring --ignore-not-found=true 2>/dev/null || true
-}
-trap cleanup EXIT
+# function cleanup {
+#   echo " ** Cleaning up..."
+#   helm uninstall vpa --namespace kube-system 2>/dev/null || true
+#   kubectl delete namespace monitoring --ignore-not-found=true 2>/dev/null || true
+# }
+# trap cleanup EXIT
 
-echo "Deleting KIND cluster 'kind'."
-kind delete cluster -n kind -q
+# echo "Deleting KIND cluster 'kind'."
+# kind delete cluster -n kind -q
 
 if [ ! -f "${KIND_CONFIG}" ]; then
   echo "Missing KIND config file: ${KIND_CONFIG}"
   exit 1
 fi
 
-echo "Creating KIND cluster 'kind'"
-if ! kind create cluster --config "${KIND_CONFIG}"; then
-    echo "Failed to create KIND cluster using ${KIND_CONFIG}. Exiting."
-    exit 1
-fi
+# echo "Creating KIND cluster 'kind'"
+# if ! kind create cluster --config "${KIND_CONFIG}"; then
+#     echo "Failed to create KIND cluster using ${KIND_CONFIG}. Exiting."
+#     exit 1
+# fi
 
 # Build and deploy external metrics writer if needed
 if [[ "${SUITE}" == "recommender-externalmetrics" ]]; then

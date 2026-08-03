@@ -256,12 +256,16 @@ const (
 // for containers belonging to the pod. There can be at most one entry for every
 // named container and optionally a single wildcard entry with `containerName` = '*',
 // which handles all containers that don't have individual policies.
+// Additionally, it controls how pod-level recommendations are calculated.
 type PodResourcePolicy struct {
 	// Per-container resource policies.
 	// +optional
 	// +patchMergeKey=containerName
 	// +patchStrategy=merge
 	ContainerPolicies []ContainerResourcePolicy `json:"containerPolicies,omitempty" patchStrategy:"merge" patchMergeKey:"containerName"`
+	// Pod-level resource policy. It controls how Pod Level Resources are calculated by the autoscaler.
+	// +optional
+	PodPolicy *PodLevelResourcePolicy `json:"podPolicy,omitempty"`
 }
 
 // ContainerResourcePolicy controls how autoscaler computes the recommended
@@ -327,6 +331,39 @@ type ContainerResourcePolicy struct {
 	StartupBoost *StartupBoost `json:"startupBoost,omitempty"`
 }
 
+// PodLevelResourcePolicy controls how the autoscaler computes recommended resources at the pod level.
+// In other words, it controls how Pod Level Resources are calculated by the autoscaler.
+type PodLevelResourcePolicy struct {
+	// Indicates whether the autoscaler is enabled at the pod level.
+	// The default is "Off", so the autoscaler does not compute recommendations at the pod level.
+	// +optional
+	Mode *ContainerScalingMode `json:"mode,omitempty"`
+	// Specifies the minimum amount of resources that the autoscaler recommends at the pod level.
+	// The default is no minimum.
+	// +optional
+	MinAllowed corev1.ResourceList `json:"minAllowed,omitempty"`
+	// Specifies the maximum amount of resources that the autoscaler recommends at the pod level.
+	// The default is no maximum.
+	// +optional
+	MaxAllowed corev1.ResourceList `json:"maxAllowed,omitempty"`
+	// Specifies the resource types (CPU, memory, or both) that VPA computes at the pod level and may apply.
+	// If not specified, the default of [ResourceCPU, ResourceMemory] will be used.
+	// +patchStrategy=merge
+	ControlledResources *[]corev1.ResourceName `json:"controlledResources,omitempty" patchStrategy:"merge"`
+	// Specifies which resource values VPA controls at the pod level.
+	// The default is "RequestsAndLimits".
+	// +optional
+	ControlledValues *ContainerControlledValues `json:"controlledValues,omitempty"`
+	// oomBumpUpRatio is the ratio by which memory is increased when an OOM is detected.
+	// The resulting increase is applied to the Pod Level Resource stanza.
+	// +optional
+	OOMBumpUpRatio *resource.Quantity `json:"oomBumpUpRatio,omitempty"`
+	// oomMinBumpUp is the minimum memory increase applied when an OOM is detected.
+	// The resulting increase is applied to the Pod Level Resource stanza.
+	// +optional
+	OOMMinBumpUp *resource.Quantity `json:"oomMinBumpUp,omitempty"`
+}
+
 const (
 	// DefaultContainerResourcePolicy can be passed as
 	// ContainerResourcePolicy.ContainerName to specify the default policy.
@@ -343,6 +380,17 @@ const (
 	ContainerScalingModeAuto ContainerScalingMode = "Auto"
 	// ContainerScalingModeOff means autoscaling is disabled for a container.
 	ContainerScalingModeOff ContainerScalingMode = "Off"
+)
+
+// PodScalingMode controls whether autoscaling is enabled at the pod level
+// +kubebuilder:validation:Enum=Auto;Off
+type PodScalingMode string
+
+const (
+	// TODO
+	PodScalingModeAuto PodScalingMode = "Auto"
+	// TODO
+	PodScalingModeOff PodScalingMode = "Off"
 )
 
 // ContainerControlledValues controls which resource value should be autoscaled.
@@ -376,13 +424,16 @@ type VerticalPodAutoscalerStatus struct {
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 }
 
-// RecommendedPodResources is the recommendation of resources computed by
-// autoscaler. It contains a recommendation for each container in the pod
-// (except for those with `ContainerScalingMode` set to 'Off').
+// RecommendedPodResources contains the resource recommendations computed by
+// the autoscaler. Resource recommendations can exist at either the container
+// level or the pod level.
 type RecommendedPodResources struct {
 	// Resources recommended by the autoscaler for each container.
 	// +optional
 	ContainerRecommendations []RecommendedContainerResources `json:"containerRecommendations,omitempty"`
+	// Resources recommended by the autoscaler at the pod level.
+	// +optional
+	PodRecommendations *RecommendedPodLevelResources `json:"podRecommendations,omitempty"`
 }
 
 // RecommendedContainerResources is the recommendation of resources computed by
@@ -409,6 +460,31 @@ type RecommendedContainerResources struct {
 	// into account the ContainerResourcePolicy.
 	// May differ from the Recommendation if the actual resource usage causes
 	// the target to violate the ContainerResourcePolicy (lower than MinAllowed
+	// or higher that MaxAllowed).
+	// Used only as status indication, will not affect actual resource assignment.
+	// +optional
+	UncappedTarget corev1.ResourceList `json:"uncappedTarget,omitempty"`
+}
+
+// RecommendedPodLevelResources is the recommendation computed by the autoscaler for Pod Level Resources.
+type RecommendedPodLevelResources struct {
+	// Pod-level recommended amount of resources. Observes PodResourcePolicies.
+	Target corev1.ResourceList `json:"target"`
+	// Pod-level minimum recommended amount of resources. Observes PodResourcePolicies.
+	// This amount is not guaranteed to be sufficient for the application to operate in a stable way, however
+	// running with less resources is likely to have significant impact on performance/availability.
+	// +optional
+	LowerBound corev1.ResourceList `json:"lowerBound,omitempty"`
+	// Pod-level maximum recommended amount of resources. Observes PodResourcePolicies.
+	// Any resources allocated beyond this value are likely wasted. This value may be larger than the maximum
+	// amount of application is actually capable of consuming.
+	// +optional
+	UpperBound corev1.ResourceList `json:"upperBound,omitempty"`
+	// The most recent recommended resources target computed by the autoscaler
+	// at the pod level, based only on actual resource usage, not taking
+	// into account the PodResourcePolicies.
+	// May differ from the Recommendation if the actual resource usage causes
+	// the target to violate the PodResourcePolicies (lower than MinAllowed
 	// or higher that MaxAllowed).
 	// Used only as status indication, will not affect actual resource assignment.
 	// +optional

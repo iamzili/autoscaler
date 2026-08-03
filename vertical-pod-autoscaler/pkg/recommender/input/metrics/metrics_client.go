@@ -25,7 +25,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/metrics/pkg/apis/metrics/v1beta1"
 
-	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
+	model "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	recommender_metrics "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/metrics/recommender"
 )
 
@@ -41,11 +41,20 @@ type ContainerMetricsSnapshot struct {
 	Usage model.Resources
 }
 
+type PodMetricsSnapshot struct {
+	// ID identifies a specific container those metrics are coming from.
+	ID                        model.PodID
+	MeasureStart              time.Time
+	Usage                     model.Resources
+	ContainerMetricsSnapshots map[string]ContainerMetricsSnapshot
+}
+
 // MetricsClient provides simple metrics on resources usage on container level.
 type MetricsClient interface {
 	// GetContainersMetrics returns an array of ContainerMetricsSnapshots,
 	// representing resource usage for every running container in the cluster
-	GetContainersMetrics(ctx context.Context) ([]*ContainerMetricsSnapshot, error)
+	//GetContainersMetrics(ctx context.Context) ([]*ContainerMetricsSnapshot, error)
+	GetPodMetrics(ctx context.Context) ([]*PodMetricsSnapshot, error)
 }
 
 type metricsClient struct {
@@ -64,8 +73,30 @@ func NewMetricsClient(source PodMetricsLister, namespace, clientName string) Met
 	}
 }
 
-func (c *metricsClient) GetContainersMetrics(ctx context.Context) ([]*ContainerMetricsSnapshot, error) {
-	var metricsSnapshots []*ContainerMetricsSnapshot
+// func (c *metricsClient) GetContainersMetrics(ctx context.Context) ([]*ContainerMetricsSnapshot, error) {
+// 	var metricsSnapshots []*ContainerMetricsSnapshot
+
+// 	podMetricsList, err := c.source.List(ctx, c.namespace, metav1.ListOptions{})
+// 	recommender_metrics.RecordMetricsServerResponse(err, c.clientName)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	if c.namespace == corev1.NamespaceAll {
+// 		klog.V(3).InfoS("podMetrics retrieved for all namespaces", "podMetrics", len(podMetricsList.Items))
+// 	} else {
+// 		klog.V(3).InfoS("podMetrics retrieved", "namespace", c.namespace, "podMetrics", len(podMetricsList.Items))
+// 	}
+
+// 	for _, podMetrics := range podMetricsList.Items {
+// 		metricsSnapshotsForPod := createContainerMetricsSnapshots(podMetrics)
+// 		metricsSnapshots = append(metricsSnapshots, metricsSnapshotsForPod...)
+// 	}
+// 	return metricsSnapshots, nil
+// }
+
+// TODO (iamzili)
+func (c *metricsClient) GetPodMetrics(ctx context.Context) ([]*PodMetricsSnapshot, error) {
+	var metricsSnapshots []*PodMetricsSnapshot
 
 	podMetricsList, err := c.source.List(ctx, c.namespace, metav1.ListOptions{})
 	recommender_metrics.RecordMetricsServerResponse(err, c.clientName)
@@ -79,24 +110,40 @@ func (c *metricsClient) GetContainersMetrics(ctx context.Context) ([]*ContainerM
 	}
 
 	for _, podMetrics := range podMetricsList.Items {
-		metricsSnapshotsForPod := createContainerMetricsSnapshots(podMetrics)
-		metricsSnapshots = append(metricsSnapshots, metricsSnapshotsForPod...)
+		metricsSnapshotsForPod := createPodMetricsSnapshots(podMetrics)
+		metricsSnapshots = append(metricsSnapshots, metricsSnapshotsForPod)
 	}
 	return metricsSnapshots, nil
 }
 
-func createContainerMetricsSnapshots(podMetrics v1beta1.PodMetrics) []*ContainerMetricsSnapshot {
-	snapshots := make([]*ContainerMetricsSnapshot, len(podMetrics.Containers))
-	for i, containerMetrics := range podMetrics.Containers {
-		snapshots[i] = newContainerMetricsSnapshot(containerMetrics, podMetrics)
+func createPodMetricsSnapshots(podMetrics v1beta1.PodMetrics) *PodMetricsSnapshot {
+	containerSnapshots := make(map[string]ContainerMetricsSnapshot, len(podMetrics.Containers))
+	sumOfContainerUsages := make(model.Resources)
+	for _, containerMetrics := range podMetrics.Containers {
+		snapshot, containerUsage := newContainerMetricsSnapshot(containerMetrics, podMetrics)
+		containerSnapshots[containerMetrics.Name] = snapshot
+		if resource, ok := containerUsage[model.ResourceCPU]; ok {
+			sumOfContainerUsages[model.ResourceCPU] += resource
+		}
+		if resource, ok := containerUsage[model.ResourceMemory]; ok {
+			sumOfContainerUsages[model.ResourceMemory] += resource
+		}
 	}
-	return snapshots
+	return &PodMetricsSnapshot{
+		ID: model.PodID{
+			Namespace: podMetrics.Namespace,
+			PodName:   podMetrics.Name,
+		},
+		Usage:                     sumOfContainerUsages,
+		MeasureStart:              podMetrics.Timestamp.Time,
+		ContainerMetricsSnapshots: containerSnapshots,
+	}
 }
 
-func newContainerMetricsSnapshot(containerMetrics v1beta1.ContainerMetrics, podMetrics v1beta1.PodMetrics) *ContainerMetricsSnapshot {
+func newContainerMetricsSnapshot(containerMetrics v1beta1.ContainerMetrics, podMetrics v1beta1.PodMetrics) (ContainerMetricsSnapshot, model.Resources) {
 	usage := calculateUsage(containerMetrics.Usage)
 
-	return &ContainerMetricsSnapshot{
+	return ContainerMetricsSnapshot{
 		ID: model.ContainerID{
 			ContainerName: containerMetrics.Name,
 			PodID: model.PodID{
@@ -107,7 +154,7 @@ func newContainerMetricsSnapshot(containerMetrics v1beta1.ContainerMetrics, podM
 		Usage:          usage,
 		SnapshotTime:   podMetrics.Timestamp.Time,
 		SnapshotWindow: podMetrics.Window.Duration,
-	}
+	}, usage
 }
 
 func calculateUsage(containerUsage corev1.ResourceList) model.Resources {

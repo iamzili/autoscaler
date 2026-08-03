@@ -188,6 +188,8 @@ type Vpa struct {
 	// All container aggregations that contribute to this VPA.
 	// TODO: Garbage collect old AggregateContainerStates.
 	aggregateContainerStates aggregateContainerStatesMap
+	// TODO (iamzili)
+	aggregatePodLevelStates *AggregateContainerState
 	// Pod Resource Policy provided in the VPA API object. Can be nil.
 	ResourcePolicy *vpa_types.PodResourcePolicy
 	// Initial checkpoints of AggregateContainerStates for containers.
@@ -220,6 +222,7 @@ func NewVpa(id VpaID, selector labels.Selector, created time.Time) *Vpa {
 		ID:                              id,
 		PodSelector:                     selector,
 		aggregateContainerStates:        make(aggregateContainerStatesMap),
+		aggregatePodLevelStates:         nil,
 		ContainersInitialAggregateState: make(ContainerNameToAggregateStateMap),
 		Created:                         created,
 		Annotations:                     make(vpaAnnotationsMap),
@@ -258,6 +261,20 @@ func (vpa *Vpa) UseAggregationIfMatching(aggregationKey AggregateStateKey, aggre
 		aggregation.IsUnderVPA = true
 		aggregation.UpdateMode = vpa.UpdateMode
 		aggregation.UpdateFromPolicy(vpa_api_util.GetContainerResourcePolicy(aggregationKey.ContainerName(), vpa.ResourcePolicy))
+	}
+}
+
+// TODO (iamzili)
+func (vpa *Vpa) UseAggregationIfMatchingPodLevel(aggregationKey AggregateStateKey, aggregation *AggregateContainerState) {
+	if vpa.aggregatePodLevelStates != nil {
+		// Already linked, we can return quickly.
+		return
+	}
+	if vpa.matchesAggregation(aggregationKey) {
+		vpa.aggregatePodLevelStates = aggregation
+		aggregation.IsUnderVPA = true
+		aggregation.UpdateMode = vpa.UpdateMode
+		//aggregation.UpdateFromPolicy(vpa_api_util.GetContainerResourcePolicy(aggregationKey.ContainerName(), vpa.ResourcePolicy))
 	}
 }
 
@@ -318,6 +335,12 @@ func (vpa *Vpa) AggregateStateByContainerName() ContainerNameToAggregateStateMap
 	containerNameToAggregateStateMap := AggregateStateByContainerName(vpa.aggregateContainerStates)
 	vpa.MergeCheckpointedState(containerNameToAggregateStateMap)
 	return containerNameToAggregateStateMap
+}
+
+// TODO (iamzili)
+func (vpa *Vpa) AggregateState() AggregateState {
+	//vpa.MergeCheckpointedState(containerNameToAggregateStateMap)
+	return vpa.aggregatePodLevelStates
 }
 
 // HasRecommendation returns if the VPA object contains any recommendation

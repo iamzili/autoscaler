@@ -508,36 +508,57 @@ func (feeder *clusterStateFeeder) LoadPods() {
 }
 
 func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
-	containersMetrics, err := feeder.metricsClient.GetContainersMetrics(ctx)
+	podMetrics, err := feeder.metricsClient.GetPodMetrics(ctx)
 	if err != nil {
 		klog.ErrorS(err, "Cannot get ContainerMetricsSnapshot from MetricsClient")
 	}
 
 	sampleCount := 0
 	droppedSampleCount := 0
-	for _, containerMetrics := range containersMetrics {
+	containerCount := 0
+	for _, podMetric := range podMetrics {
 		// Container metrics are fetched for all pods, however, not all pod states are tracked in memory saver mode.
-		if pod, exists := feeder.clusterState.Pods()[containerMetrics.ID.PodID]; exists && pod != nil {
-			if slices.Contains(pod.InitContainers, containerMetrics.ID.ContainerName) {
-				klog.V(3).InfoS("Skipping metric samples for init container", "pod", klog.KRef(containerMetrics.ID.Namespace, containerMetrics.ID.PodName), "container", containerMetrics.ID.ContainerName)
-				droppedSampleCount += len(containerMetrics.Usage)
-				continue
+		if pod, exists := feeder.clusterState.Pods()[podMetric.ID]; exists && pod != nil {
+
+			for contanerName, containerMetrics := range podMetric.ContainerMetricsSnapshots {
+				if slices.Contains(pod.InitContainers, contanerName) {
+					klog.V(3).InfoS("Skipping metric samples for init container", "pod", klog.KRef(pod.ID.Namespace, pod.ID.PodName), "container", contanerName)
+					droppedSampleCount += len(containerMetrics.Usage)
+					continue
+				}
+				for _, sample := range newContainerUsageSamplesWithKey(&containerMetrics) {
+					if err := feeder.clusterState.AddSample(sample); err != nil {
+						// Not all pod states are tracked in memory saver mode.
+						if _, isKeyError := err.(model.KeyError); isKeyError && feeder.memorySaveMode {
+							continue
+						}
+						klog.V(0).InfoS("Error adding metric sample", "sample", sample, "error", err)
+						droppedSampleCount++
+					} else {
+						sampleCount++
+						containerCount++
+					}
+				}
 			}
-		}
-		for _, sample := range newContainerUsageSamplesWithKey(containerMetrics) {
-			if err := feeder.clusterState.AddSample(sample); err != nil {
+			var podLevelSample model.PodSample
+			podLevelSample.ID = podMetric.ID
+			podLevelSample.MeasureStart = podMetric.MeasureStart
+			podLevelSample.Usage = podMetric.Usage
+			// add aggregate pod level sample
+			if err := feeder.clusterState.AddPodLevelSample(podLevelSample); err != nil {
 				// Not all pod states are tracked in memory saver mode.
 				if _, isKeyError := err.(model.KeyError); isKeyError && feeder.memorySaveMode {
 					continue
 				}
-				klog.V(0).InfoS("Error adding metric sample", "sample", sample, "error", err)
+				klog.V(0).InfoS("Error adding metric sample to Pod level histogram", "podMetrics.Usage", podMetric.Usage, "error", err)
 				droppedSampleCount++
 			} else {
 				sampleCount++
+				containerCount++
 			}
 		}
 	}
-	klog.V(3).InfoS("ClusterSpec fed with ContainerUsageSamples", "sampleCount", sampleCount, "containerCount", len(containersMetrics), "droppedSampleCount", droppedSampleCount)
+	klog.V(3).InfoS("ClusterSpec fed with ContainerUsageSamples", "sampleCount", sampleCount, "containerCount", containerCount, "droppedSampleCount", droppedSampleCount)
 Loop:
 	for {
 		select {

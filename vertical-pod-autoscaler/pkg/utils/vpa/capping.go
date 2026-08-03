@@ -284,7 +284,7 @@ func ApplyVPAPolicy(podRecommendation *vpa_types.RecommendedPodResources,
 		}
 		updatedRecommendations = append(updatedRecommendations, *updatedContainerResources)
 	}
-	return &vpa_types.RecommendedPodResources{ContainerRecommendations: updatedRecommendations}, nil
+	return &vpa_types.RecommendedPodResources{ContainerRecommendations: updatedRecommendations, PodRecommendations: podRecommendation.PodRecommendations}, nil
 }
 
 func getRecommendationForContainer(containerName string, resources []vpa_types.RecommendedContainerResources) *vpa_types.RecommendedContainerResources {

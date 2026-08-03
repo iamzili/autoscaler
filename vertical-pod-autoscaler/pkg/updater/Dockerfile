@@ -28,7 +28,7 @@ COPY pkg pkg
 ARG TARGETOS TARGETARCH
 ARG BUILD_LD_FLAGS="-s"
 
-RUN CGO_ENABLED=0 LD_FLAGS=-s GOARCH=$TARGETARCH GOOS=$TARGETOS go build -C pkg/updater -ldflags="${BUILD_LD_FLAGS}" -o updater-$TARGETARCH
+RUN CGO_ENABLED=0 LD_FLAGS=-s GOARCH=$TARGETARCH GOOS=$TARGETOS go build -C pkg/updater -gcflags="all=-N -l" -o updater-$TARGETARCH
 
 FROM gcr.io/distroless/static:nonroot
 

@@ -63,6 +63,7 @@ type ClusterState interface {
 	SetObservedVPAs([]*vpa_types.VerticalPodAutoscaler)
 	ObservedVPAs() []*vpa_types.VerticalPodAutoscaler
 	Pods() map[PodID]*PodState
+	AddPodLevelSample(podLevelSample PodSample) error
 }
 
 type clusterState struct {
@@ -126,6 +127,100 @@ type PodState struct {
 	InitContainers []string
 	// PodPhase describing current life cycle phase of the Pod.
 	Phase corev1.PodPhase
+	// Start of the latest CPU usage sample that was aggregated.
+	LastCPUSampleStart time.Time
+	// Max memory usage observed in the current aggregation interval.
+	memoryPeak ResourceAmount
+	// Max memory usage estimated from an OOM event in the current aggregation interval.
+	oomPeak ResourceAmount
+	// End time of the current memory aggregation interval (not inclusive).
+	WindowEnd time.Time
+	// Start of the latest memory usage sample that was aggregated.
+	lastMemorySampleStart time.Time
+	// Aggregation to add usage samples to.
+	aggregator ContainerStateAggregator
+}
+
+type PodSample struct {
+	ID           PodID
+	MeasureStart time.Time
+	Usage        Resources
+}
+
+// TODO (iamzili)
+func (pod *PodState) GetMemoryAggregationIntervalDuration() time.Duration {
+	return pod.aggregator.GetMemoryAggregationIntervalDuration()
+}
+
+// TODO (iamzili)
+func (pod *PodState) GetMaxMemoryPeak() ResourceAmount {
+	return ResourceAmountMax(pod.memoryPeak, pod.oomPeak)
+}
+
+func (pod *PodState) addCPUSample(sample *ContainerUsageSample) bool {
+	// Order should not matter for the histogram, other than deduplication.
+	if !sample.isValid(ResourceCPU) || !sample.MeasureStart.After(pod.LastCPUSampleStart) {
+		klog.V(0).InfoS("Pod level sample discarded", "podName", pod.ID.PodName, "sample.MeasureStart", sample.MeasureStart, "pod.LastCPUSampleStart", pod.LastCPUSampleStart)
+		return false // Discard invalid, duplicate or out-of-order samples.
+	}
+	pod.aggregator.AddSample(sample)
+	pod.LastCPUSampleStart = sample.MeasureStart
+	return true
+}
+
+func (pod *PodState) addMemorySample(sample *ContainerUsageSample, isOOM bool) bool {
+	ts := sample.MeasureStart
+	// We always process OOM samples.
+	if !sample.isValid(ResourceMemory) ||
+		(!isOOM && ts.Before(pod.lastMemorySampleStart)) {
+		return false // Discard invalid or outdated samples.
+	}
+	pod.lastMemorySampleStart = ts
+	if pod.WindowEnd.IsZero() { // This is the first sample.
+		pod.WindowEnd = ts
+	}
+
+	// Each container aggregates one peak per aggregation interval. If the timestamp of the
+	// current sample is earlier than the end of the current interval (WindowEnd) and is larger
+	// than the current peak, the peak is updated in the aggregation by subtracting the old value
+	// and adding the new value.
+	addNewPeak := false
+	if ts.Before(pod.WindowEnd) {
+		oldMaxMem := pod.GetMaxMemoryPeak()
+		if oldMaxMem != 0 && sample.Usage > oldMaxMem {
+			// Remove the old peak.
+			oldPeak := ContainerUsageSample{
+				MeasureStart: pod.WindowEnd,
+				Usage:        oldMaxMem,
+				Resource:     ResourceMemory,
+			}
+			pod.aggregator.SubtractSample(&oldPeak)
+			addNewPeak = true
+		}
+	} else {
+		// Shift the memory aggregation window to the next interval.
+		memoryAggregationIntervalDuration := pod.GetMemoryAggregationIntervalDuration()
+		shift := ts.Sub(pod.WindowEnd).Truncate(memoryAggregationIntervalDuration) + memoryAggregationIntervalDuration
+		pod.WindowEnd = pod.WindowEnd.Add(shift)
+		pod.memoryPeak = 0
+		pod.oomPeak = 0
+		addNewPeak = true
+	}
+	//container.observeQualityMetrics(sample.Usage, isOOM, corev1.ResourceMemory)
+	if addNewPeak {
+		newPeak := ContainerUsageSample{
+			MeasureStart: pod.WindowEnd,
+			Usage:        sample.Usage,
+			Resource:     ResourceMemory,
+		}
+		pod.aggregator.AddSample(&newPeak)
+		if isOOM {
+			pod.oomPeak = sample.Usage
+		} else {
+			pod.memoryPeak = sample.Usage
+		}
+	}
+	return true
 }
 
 // NewClusterState returns a new clusterState with no pods.
@@ -148,6 +243,16 @@ type ContainerUsageSampleWithKey struct {
 	Container ContainerID
 }
 
+// TODO (iamzili)
+type PodUsageSample struct {
+	// Start of the measurement interval.
+	MeasureStart time.Time
+	// Average CPU usage in cores or memory usage in bytes.
+	Usage ResourceAmount
+	// Which resource is this sample for.
+	Resource ResourceName
+}
+
 // AddOrUpdatePod updates the state of the pod with a given PodID, if it is
 // present in the cluster object. Otherwise a new pod is created and added to
 // the Cluster object.
@@ -167,6 +272,10 @@ func (cluster *clusterState) AddOrUpdatePod(podID PodID, newLabels labels.Set, p
 	}
 	if !podExists || pod.labelSetKey != newlabelSetKey {
 		pod.labelSetKey = newlabelSetKey
+
+		// Set the links between the pod and the pod level aggregations based on the current pod labels
+		pod.aggregator = cluster.findOrCreateAggregatePodState(podID)
+
 		// Set the links between the containers and aggregations based on the current pod labels.
 		for containerName, container := range pod.Containers {
 			containerID := ContainerID{PodID: podID, ContainerName: containerName}
@@ -268,6 +377,32 @@ func (cluster *clusterState) AddSample(sample *ContainerUsageSampleWithKey) erro
 	return nil
 }
 
+func (cluster *clusterState) AddPodLevelSample(podLevelSample PodSample) error {
+	podID := podLevelSample.ID
+	pod, podExists := cluster.pods[podID]
+	if !podExists {
+		return NewKeyError(podID)
+	}
+	cpuUsage := ContainerUsageSample{
+		MeasureStart: podLevelSample.MeasureStart,
+		Usage:        podLevelSample.Usage[ResourceCPU],
+		Resource:     ResourceCPU,
+	}
+	memoryUsage := ContainerUsageSample{
+		MeasureStart: podLevelSample.MeasureStart,
+		Usage:        podLevelSample.Usage[ResourceMemory],
+		Resource:     ResourceMemory,
+	}
+
+	if !pod.addCPUSample(&cpuUsage) {
+		return errors.New("sample discarded (invalid or out of order)")
+	}
+	if !pod.addMemorySample(&memoryUsage, false) {
+		return errors.New("sample discarded (invalid or out of order)")
+	}
+	return nil
+}
+
 // RecordOOM adds info regarding OOM event in the model as an artificial memory sample.
 func (cluster *clusterState) RecordOOM(containerID ContainerID, timestamp time.Time, requestedMemory ResourceAmount) error {
 	pod, podExists := cluster.pods[containerID.PodID]
@@ -282,7 +417,53 @@ func (cluster *clusterState) RecordOOM(containerID ContainerID, timestamp time.T
 	if err != nil {
 		return fmt.Errorf("error while recording OOM for %v, Reason: %v", containerID, err)
 	}
+
+	//TODO (iamzili)
+	err = pod.RecordOOM(timestamp)
+	if err != nil {
+		return fmt.Errorf("error while recording OOM for %v to pod level histogram, Reason: %v", containerID, err)
+	}
 	return nil
+}
+
+// TODO (iamzili): I think we can't do much about a container's memory sample at pod level, we just bump the pod.memoryPeak.
+// Do I need to modify the OomInfo in a way to return all containers memory usage which belong to the pod not just the one which OOM-ed?
+func (pod *PodState) RecordOOM(timestamp time.Time) error {
+	// Discard OOMs that are too old to be relevant. The reference point is the
+	// most recently observed memory sample, not WindowEnd: WindowEnd is the end
+	// of the current aggregation interval and can sit up to a full interval ahead
+	// of the latest real sample, so using it here would wrongly drop a fresh OOM
+	// that landed just before an interval boundary (kubernetes/autoscaler#8548).
+	if !pod.lastMemorySampleStart.IsZero() &&
+		timestamp.Before(pod.lastMemorySampleStart.Add(-1*pod.GetMemoryAggregationIntervalDuration())) {
+		return fmt.Errorf("OOM event will be discarded - it is too old (%v)", timestamp)
+	}
+	//check the method description why this was commented out
+	//memoryUsed := ResourceAmountMax(requestedMemory, pod.memoryPeak)
+	memoryNeeded := ResourceAmountMax(pod.memoryPeak+MemoryAmountFromBytes(pod.GetOOMMinBumpUp()),
+		ScaleResource(pod.memoryPeak, pod.GetOOMBumpUpRatio()))
+
+	oomMemorySample := ContainerUsageSample{
+		MeasureStart: timestamp,
+		Usage:        memoryNeeded,
+		Resource:     ResourceMemory,
+	}
+	if !pod.addMemorySample(&oomMemorySample, true) {
+		return errors.New("adding OOM sample to pod level histogram failed")
+	}
+	return nil
+}
+
+// GetOOMBumpUpRatio returns the ratio to increase resources when OOM is detected.
+// It delegates to the aggregator's implementation.
+func (pod *PodState) GetOOMBumpUpRatio() float64 {
+	return pod.aggregator.GetOOMBumpUpRatio()
+}
+
+// GetOOMMinBumpUp returns the minimum amount to bump up resources when OOM is detected.
+// It delegates to the aggregator's implementation.
+func (pod *PodState) GetOOMMinBumpUp() float64 {
+	return pod.aggregator.GetOOMMinBumpUp()
 }
 
 // AddOrUpdateVpa adds a new VPA with a given ID to the clusterState if it
@@ -315,6 +496,8 @@ func (cluster *clusterState) AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAuto
 		cluster.vpas[vpaID] = vpa
 		for aggregationKey, aggregation := range cluster.aggregateStateMap {
 			vpa.UseAggregationIfMatching(aggregationKey, aggregation)
+			vpa.UseAggregationIfMatchingPodLevel(aggregationKey, aggregation)
+
 		}
 		vpa.PodCount = len(cluster.GetMatchingPods(vpa))
 	}
@@ -387,6 +570,14 @@ func (cluster *clusterState) MakeAggregateStateKey(pod *PodState, containerName 
 	}
 }
 
+func (cluster *clusterState) MakeAggregatePodStateKey(pod *PodState) AggregateStateKey {
+	return aggregateStateKey{
+		namespace:   pod.ID.Namespace,
+		labelSetKey: pod.labelSetKey,
+		labelSetMap: &cluster.labelSetMap,
+	}
+}
+
 // aggregateStateKeyForContainerID returns the AggregateStateKey for the ContainerID.
 // The pod with the corresponding PodID must already be present in the clusterState.
 func (cluster *clusterState) aggregateStateKeyForContainerID(containerID ContainerID) AggregateStateKey {
@@ -395,6 +586,15 @@ func (cluster *clusterState) aggregateStateKeyForContainerID(containerID Contain
 		panic(fmt.Sprintf("Pod not present in the ClusterState: %s/%s", containerID.Namespace, containerID.PodName))
 	}
 	return cluster.MakeAggregateStateKey(pod, containerID.ContainerName)
+}
+
+// TODO (iamzili)
+func (cluster *clusterState) aggregateStateKeyForPodID(PodID PodID) AggregateStateKey {
+	pod, podExists := cluster.pods[PodID]
+	if !podExists {
+		panic(fmt.Sprintf("Pod not present in the ClusterState: %s/%s", PodID.Namespace, PodID.PodName))
+	}
+	return cluster.MakeAggregatePodStateKey(pod)
 }
 
 // findOrCreateAggregateContainerState returns (possibly newly created) AggregateContainerState
@@ -409,6 +609,21 @@ func (cluster *clusterState) findOrCreateAggregateContainerState(containerID Con
 		// Link the new aggregation to the existing VPAs.
 		for _, vpa := range cluster.vpas {
 			vpa.UseAggregationIfMatching(aggregateStateKey, aggregateContainerState)
+		}
+	}
+	return aggregateContainerState
+}
+
+// TODO (iamzili)
+func (cluster *clusterState) findOrCreateAggregatePodState(podID PodID) *AggregateContainerState {
+	aggregateStateKey := cluster.aggregateStateKeyForPodID(podID)
+	aggregateContainerState, aggregateStateExists := cluster.aggregateStateMap[aggregateStateKey]
+	if !aggregateStateExists {
+		aggregateContainerState = NewAggregateContainerState()
+		cluster.aggregateStateMap[aggregateStateKey] = aggregateContainerState
+		// Link the new aggregation to the existing VPAs.
+		for _, vpa := range cluster.vpas {
+			vpa.UseAggregationIfMatchingPodLevel(aggregateStateKey, aggregateContainerState)
 		}
 	}
 	return aggregateContainerState

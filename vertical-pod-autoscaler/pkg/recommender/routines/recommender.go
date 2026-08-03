@@ -18,10 +18,12 @@ package routines
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
+	"k8s.io/utils/dump"
 
 	vpaautoscalingv1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 	vpa_api "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1"
@@ -79,7 +81,17 @@ func processVPAUpdate(r *recommender, vpa *model.Vpa, observedVpa *vpaautoscalin
 	resources := r.podResourceRecommender.GetRecommendedPodResources(GetContainerNameToAggregateStateMap(vpa))
 	had := vpa.HasRecommendation()
 
+	// TODO (iamzili)
+	podLevelResources := r.podResourceRecommender.GetRecommendedPodLevelResources(GetAggregateState(vpa))
+	klog.V(0).InfoS("PodLevel processVPAUpdate", "vpa.TargetRef", vpa.TargetRef)
+	fmt.Println(dump.Pretty(podLevelResources))
+
 	listOfResourceRecommendation := logic.MapToListOfRecommendedContainerResources(resources, r.recommendationFormat)
+
+	podLevelRecommendations := logic.GetPodLevelRecommendations(podLevelResources, r.recommendationFormat)
+	if podLevelRecommendations != nil {
+		listOfResourceRecommendation.PodRecommendations = podLevelRecommendations
+	}
 
 	for _, postProcessor := range r.recommendationPostProcessor {
 		listOfResourceRecommendation = postProcessor.Process(observedVpa, listOfResourceRecommendation)
@@ -183,14 +195,14 @@ func (r *recommender) RunOnce() {
 	r.UpdateVPAs()
 	timer.ObserveStep("UpdateVPAs")
 
-	stepCtx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(r.checkpointsWriteTimeout))
-	defer cancelFunc()
-	r.MaintainCheckpoints(stepCtx)
-	timer.ObserveStep("MaintainCheckpoints")
+	// stepCtx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(r.checkpointsWriteTimeout))
+	// defer cancelFunc()
+	// r.MaintainCheckpoints(stepCtx)
+	// timer.ObserveStep("MaintainCheckpoints")
 
-	r.clusterState.RateLimitedGarbageCollectAggregateCollectionStates(ctx, time.Now(), r.controllerFetcher)
-	timer.ObserveStep("GarbageCollect")
-	klog.V(3).InfoS("ClusterState is tracking", "aggregateContainerStates", r.clusterState.StateMapSize())
+	// r.clusterState.RateLimitedGarbageCollectAggregateCollectionStates(ctx, time.Now(), r.controllerFetcher)
+	// timer.ObserveStep("GarbageCollect")
+	// klog.V(3).InfoS("ClusterState is tracking", "aggregateContainerStates", r.clusterState.StateMapSize())
 }
 
 // RecommenderFactory makes instances of Recommender.

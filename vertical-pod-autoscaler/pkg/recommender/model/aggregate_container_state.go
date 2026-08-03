@@ -54,6 +54,8 @@ import (
 // that aggregates state of containers with that name.
 type ContainerNameToAggregateStateMap map[string]*AggregateContainerState
 
+type AggregateState *AggregateContainerState
+
 const (
 	// SupportedCheckpointVersion is the tag of the supported version of serialized checkpoints.
 	// Version id should be incremented on every non incompatible change, i.e. if the new
@@ -383,6 +385,9 @@ func AggregateStateByContainerName(aggregateContainerStateMap aggregateContainer
 	containerNameToAggregateStateMap := make(ContainerNameToAggregateStateMap)
 	for aggregationKey, aggregation := range aggregateContainerStateMap {
 		containerName := aggregationKey.ContainerName()
+		if containerName == "" {
+			continue
+		}
 		aggregateContainerState, isInitialized := containerNameToAggregateStateMap[containerName]
 		if !isInitialized {
 			aggregateContainerState = NewAggregateContainerState()

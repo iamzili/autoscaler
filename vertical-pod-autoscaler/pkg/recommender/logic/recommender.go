@@ -49,6 +49,8 @@ type RecommendationFormat struct {
 // PodResourceRecommender computes resource recommendation for a Vpa object.
 type PodResourceRecommender interface {
 	GetRecommendedPodResources(containerNameToAggregateStateMap model.ContainerNameToAggregateStateMap) RecommendedPodResources
+	// TODO (iamzili)
+	GetRecommendedPodLevelResources(aggregateState model.AggregateState) RecommendedContainerResources
 }
 
 // RecommendedPodResources is a Map from container name to recommended resources.
@@ -101,6 +103,29 @@ func (r *podResourceRecommender) GetRecommendedPodResources(containerNameToAggre
 		recommendation[containerName] = recommender.estimateContainerResources(aggregatedContainerState)
 	}
 	return recommendation
+}
+
+// TODO (iamzili)
+func (r *podResourceRecommender) GetRecommendedPodLevelResources(aggregateState model.AggregateState) RecommendedContainerResources {
+	if aggregateState == nil {
+		return RecommendedContainerResources{}
+	}
+
+	fraction := 1.0
+	minCPU := model.ScaleResource(model.CPUAmountFromCores(r.minCPUMillicores*0.001), fraction)
+	minMemory := model.ScaleResource(model.MemoryAmountFromBytes(r.minMemoryMb*1024*1024), fraction)
+
+	recommender := &podResourceRecommender{
+		targetCPU:        WithCPUMinResource(minCPU, r.targetCPU),
+		targetMemory:     WithMemoryMinResource(minMemory, r.targetMemory),
+		lowerBoundCPU:    WithCPUMinResource(minCPU, r.lowerBoundCPU),
+		lowerBoundMemory: WithMemoryMinResource(minMemory, r.lowerBoundMemory),
+		upperBoundCPU:    WithCPUMinResource(minCPU, r.upperBoundCPU),
+		upperBoundMemory: WithMemoryMinResource(minMemory, r.upperBoundMemory),
+		minCPUMillicores: r.minCPUMillicores,
+		minMemoryMb:      r.minMemoryMb,
+	}
+	return recommender.estimateContainerResources(aggregateState)
 }
 
 // Takes AggregateContainerState and returns a container recommendation.
@@ -214,4 +239,14 @@ func MapToListOfRecommendedContainerResources(resources RecommendedPodResources,
 		ContainerRecommendations: containerResources,
 	}
 	return recommendation
+}
+
+// TODO (iamzili)
+func GetPodLevelRecommendations(resources RecommendedContainerResources, format RecommendationFormat) *vpa_types.RecommendedPodLevelResources {
+	return &vpa_types.RecommendedPodLevelResources{
+		Target:         model.ResourcesAsResourceList(resources.Target, format.HumanizeMemory, format.RoundCPUMillicores, format.RoundMemoryBytes),
+		LowerBound:     model.ResourcesAsResourceList(resources.LowerBound, format.HumanizeMemory, format.RoundCPUMillicores, format.RoundMemoryBytes),
+		UpperBound:     model.ResourcesAsResourceList(resources.UpperBound, format.HumanizeMemory, format.RoundCPUMillicores, format.RoundMemoryBytes),
+		UncappedTarget: model.ResourcesAsResourceList(resources.Target, format.HumanizeMemory, format.RoundCPUMillicores, format.RoundMemoryBytes),
+	}
 }

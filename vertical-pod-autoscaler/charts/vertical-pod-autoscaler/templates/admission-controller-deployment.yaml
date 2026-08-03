@@ -92,21 +92,21 @@ spec:
             - containerPort: 8944
               name: prometheus
               protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /health-check
-              port: prometheus
-              scheme: HTTP
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /health-check
-              port: prometheus
-              scheme: HTTP
-            periodSeconds: 10
-            failureThreshold: 3
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health-check
+          #     port: prometheus
+          #     scheme: HTTP
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          #   failureThreshold: 3
+          # readinessProbe:
+          #   httpGet:
+          #     path: /health-check
+          #     port: prometheus
+          #     scheme: HTTP
+          #   periodSeconds: 10
+          #   failureThreshold: 3
           volumeMounts:
             {{- if .Values.admissionController.certManager.enabled }}
             - name: tls-certs

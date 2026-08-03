@@ -66,6 +66,7 @@ spec:
           args:
             - --v=4
             - --stderrthreshold=info
+            - --min-replicas=1
             {{- if eq (include "vertical-pod-autoscaler.updater.leaderElectionEnabled" .) "true" }}
             - --leader-elect=true
             - --leader-elect-resource-namespace={{ .Values.updater.leaderElection.resourceNamespace | default .Release.Namespace }}
@@ -84,21 +85,21 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          livenessProbe:
-            httpGet:
-              path: /health-check
-              port: prometheus
-              scheme: HTTP
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /health-check
-              port: prometheus
-              scheme: HTTP
-            periodSeconds: 10
-            failureThreshold: 3
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health-check
+          #     port: prometheus
+          #     scheme: HTTP
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          #   failureThreshold: 3
+          # readinessProbe:
+          #   httpGet:
+          #     path: /health-check
+          #     port: prometheus
+          #     scheme: HTTP
+          #   periodSeconds: 10
+          #   failureThreshold: 3
           {{- with .Values.containerSecurityContext }}
           securityContext:
             {{ toYaml . | nindent 12 | trim }}

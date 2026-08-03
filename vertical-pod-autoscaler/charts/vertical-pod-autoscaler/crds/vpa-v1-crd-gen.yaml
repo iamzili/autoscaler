@@ -471,6 +471,76 @@ spec:
                           type: object
                       type: object
                     type: array
+                  podPolicy:
+                    description: Pod-level resource policy. It controls how Pod Level
+                      Resources are calculated by the autoscaler.
+                    properties:
+                      controlledResources:
+                        description: |-
+                          Specifies the resource types (CPU, memory, or both) that VPA computes at the pod level and may apply.
+                          If not specified, the default of [ResourceCPU, ResourceMemory] will be used.
+                        items:
+                          description: ResourceName is the name identifying various
+                            resources in a ResourceList.
+                          type: string
+                        type: array
+                      controlledValues:
+                        description: |-
+                          Specifies which resource values VPA controls at the pod level.
+                          The default is "RequestsAndLimits".
+                        enum:
+                        - RequestsAndLimits
+                        - RequestsOnly
+                        type: string
+                      maxAllowed:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Specifies the maximum amount of resources that the autoscaler recommends at the pod level.
+                          The default is no maximum.
+                        type: object
+                      minAllowed:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Specifies the minimum amount of resources that the autoscaler recommends at the pod level.
+                          The default is no minimum.
+                        type: object
+                      mode:
+                        description: |-
+                          Indicates whether the autoscaler is enabled at the pod level.
+                          The default is "Off", so the autoscaler does not compute recommendations at the pod level.
+                        enum:
+                        - Auto
+                        - "Off"
+                        type: string
+                      oomBumpUpRatio:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: |-
+                          oomBumpUpRatio is the ratio by which memory is increased when an OOM is detected.
+                          The resulting increase is applied to the Pod Level Resource stanza.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      oomMinBumpUp:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: |-
+                          oomMinBumpUp is the minimum memory increase applied when an OOM is detected.
+                          The resulting increase is applied to the Pod Level Resource stanza.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
                 type: object
               startupBoost:
                 description: startupBoost specifies the startup boost policy for the
@@ -745,6 +815,63 @@ spec:
                       - target
                       type: object
                     type: array
+                  podRecommendations:
+                    description: Resources recommended by the autoscaler at the pod
+                      level.
+                    properties:
+                      lowerBound:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Pod-level minimum recommended amount of resources. Observes PodResourcePolicies.
+                          This amount is not guaranteed to be sufficient for the application to operate in a stable way, however
+                          running with less resources is likely to have significant impact on performance/availability.
+                        type: object
+                      target:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: Pod-level recommended amount of resources. Observes
+                          PodResourcePolicies.
+                        type: object
+                      uncappedTarget:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          The most recent recommended resources target computed by the autoscaler
+                          at the pod level, based only on actual resource usage, not taking
+                          into account the PodResourcePolicies.
+                          May differ from the Recommendation if the actual resource usage causes
+                          the target to violate the PodResourcePolicies (lower than MinAllowed
+                          or higher that MaxAllowed).
+                          Used only as status indication, will not affect actual resource assignment.
+                        type: object
+                      upperBound:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Pod-level maximum recommended amount of resources. Observes PodResourcePolicies.
+                          Any resources allocated beyond this value are likely wasted. This value may be larger than the maximum
+                          amount of application is actually capable of consuming.
+                        type: object
+                    required:
+                    - target
+                    type: object
                 type: object
             type: object
         required:

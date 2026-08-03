@@ -38,3 +38,20 @@ func GetContainerNameToAggregateStateMap(vpa *model.Vpa) model.ContainerNameToAg
 	}
 	return filteredContainerNameToAggregateStateMap
 }
+
+// TODO (iamzili)
+func GetAggregateState(vpa *model.Vpa) model.AggregateState {
+	notFiltered := vpa.AggregateState()
+	// filteredContainerNameToAggregateStateMap := make(model.ContainerNameToAggregateStateMap)
+
+	// for containerName, aggregatedContainerState := range containerNameToAggregateStateMap {
+	// 	containerResourcePolicy := api_utils.GetContainerResourcePolicy(containerName, vpa.ResourcePolicy)
+	// 	autoscalingDisabled := containerResourcePolicy != nil && containerResourcePolicy.Mode != nil &&
+	// 		*containerResourcePolicy.Mode == vpa_types.ContainerScalingModeOff
+	// 	if !autoscalingDisabled {
+	// 		aggregatedContainerState.UpdateFromPolicy(containerResourcePolicy)
+	// 		filteredContainerNameToAggregateStateMap[containerName] = aggregatedContainerState
+	// 	}
+	// }
+	return notFiltered
+}
