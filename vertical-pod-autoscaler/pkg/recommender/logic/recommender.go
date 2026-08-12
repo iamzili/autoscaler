@@ -50,7 +50,7 @@ type RecommendationFormat struct {
 type PodResourceRecommender interface {
 	GetRecommendedPodResources(containerNameToAggregateStateMap model.ContainerNameToAggregateStateMap) RecommendedPodResources
 	// TODO (iamzili)
-	GetRecommendedPodLevelResources(aggregateState model.AggregateState) RecommendedContainerResources
+	GetRecommendedPodLevelResources(aggregateState *model.AggregateContainerState) RecommendedContainerResources
 }
 
 // RecommendedPodResources is a Map from container name to recommended resources.
@@ -106,7 +106,7 @@ func (r *podResourceRecommender) GetRecommendedPodResources(containerNameToAggre
 }
 
 // TODO (iamzili)
-func (r *podResourceRecommender) GetRecommendedPodLevelResources(aggregateState model.AggregateState) RecommendedContainerResources {
+func (r *podResourceRecommender) GetRecommendedPodLevelResources(aggregateState *model.AggregateContainerState) RecommendedContainerResources {
 	if aggregateState == nil {
 		return RecommendedContainerResources{}
 	}

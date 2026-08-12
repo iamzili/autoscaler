@@ -382,3 +382,11 @@ func GetPodCondition(status *corev1.PodStatus, conditionType corev1.PodCondition
 	}
 	return -1, nil
 }
+
+// GetPodControlledValues returns controlled resource values from the podPolicies stanza.
+func GetPodControlledValues(vpaResourcePolicy *vpa_types.PodResourcePolicy) vpa_types.ContainerControlledValues {
+	if vpaResourcePolicy == nil || vpaResourcePolicy.PodPolicy == nil || vpaResourcePolicy.PodPolicy.ControlledValues == nil {
+		return vpa_types.ContainerControlledValuesRequestsAndLimits
+	}
+	return *vpaResourcePolicy.PodPolicy.ControlledValues
+}

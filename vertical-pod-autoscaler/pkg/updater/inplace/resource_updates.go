@@ -54,10 +54,11 @@ func (c *resourcesInplaceUpdatesPatchCalculator) CalculatePatches(pod *corev1.Po
 	expiredAnnotations := vpa_api_util.GetExpiredStartupCPUBoostAnnotations(pod, vpa)
 
 	updateMode := vpa_api_util.GetUpdateMode(vpa)
+	var podResources *vpa_api_util.ContainerResources
 	var recommendedResources []vpa_api_util.ContainerResources
 	if updateMode != vpa_types.UpdateModeOff {
 		var err error
-		recommendedResources, _, err = c.recommendationProvider.GetContainersResourcesForPod(pod, vpa)
+		recommendedResources, _, podResources, err = c.recommendationProvider.GetContainersResourcesForPod(pod, vpa)
 		if err != nil {
 			return []resource_admission.PatchRecord{}, fmt.Errorf("failed to calculate resource patch for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
@@ -88,8 +89,14 @@ func (c *resourcesInplaceUpdatesPatchCalculator) CalculatePatches(pod *corev1.Po
 			targetResources = recommendedResources[i]
 		}
 
-		newPatches := getContainerPatch(pod, i, targetResources)
-		result = append(result, newPatches...)
+		// iamzili don't add patches for containers
+		getContainerPatch(pod, i, targetResources)
+		//result = append(result, newPatches...)
+	}
+
+	if podResources != nil {
+		result = patch.AppendPodLevelResourcePatches(result, "requests", podResources.Requests)
+		result = patch.AppendPodLevelResourcePatches(result, "limits", podResources.Limits)
 	}
 
 	return result, nil

@@ -63,6 +63,7 @@ spec:
             - --stderrthreshold=info
             - --pod-recommendation-min-memory-mb=50
             - --pod-recommendation-min-cpu-millicores=20
+            - --memory-saver
             {{- /* Smart auto-enable: if enabled is null, auto-enable when replicas > 1 */ -}}
             {{- $leaderElectionEnabled := .Values.recommender.leaderElection.enabled }}
             {{- if eq $leaderElectionEnabled nil }}

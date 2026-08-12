@@ -23,7 +23,6 @@ import (
 	"k8s.io/klog/v2"
 
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
-	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/annotations"
 	resourcehelpers "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/resources"
 	vpa_api_util "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/vpa"
@@ -109,7 +108,7 @@ func (*defaultPriorityProcessor) GetUpdatePriority(pod *corev1.Pod, vpa *vpa_typ
 	// Sum of recommendations for all containers or at the Pod level, per resource type.
 	totalRecommendedPerResource := make(map[corev1.ResourceName]int64)
 	hasObservedContainers, vpaContainerSet := parseVpaObservedContainers(pod)
-	podLevelFeatureEnable := features.Enabled(features.VPAPodLevelResources)
+	//podLevelFeatureEnable := features.Enabled(features.VPAPodLevelResources)
 
 	setPodPriorityFields := func(target, lowerBound, upperBound, requests corev1.ResourceList) {
 		// TODO: Do not use MilliValue() on memory quantities.
@@ -160,7 +159,9 @@ func (*defaultPriorityProcessor) GetUpdatePriority(pod *corev1.Pod, vpa *vpa_typ
 	// Calculate the relative difference between summed requests and summed recommendations at the container level
 	calculateResourceDiff()
 
-	if podLevelFeatureEnable && recommendation != nil && recommendation.PodRecommendations != nil {
+	//if podLevelFeatureEnable && recommendation != nil && recommendation.PodRecommendations != nil {
+	if recommendation != nil && recommendation.PodRecommendations != nil {
+
 		podRequests, _ := resourcehelpers.PodRequestsAndLimits(pod)
 		clear(totalRequestPerResource)
 		clear(totalRecommendedPerResource)

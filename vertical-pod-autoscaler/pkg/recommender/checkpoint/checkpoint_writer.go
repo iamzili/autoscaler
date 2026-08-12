@@ -98,6 +98,19 @@ func processCheckpointUpdateForVPA(vpa *model.Vpa, writer *checkpointWriter) {
 			vpa.CheckpointWritten = now
 		}
 	}
+	if IsPodLevelAutoscalingEnabled(vpa) {
+
+	}
+
+}
+
+func IsPodLevelAutoscalingEnabled(vpa *model.Vpa) bool {
+	if vpa.ResourcePolicy == nil ||
+		vpa.ResourcePolicy.PodPolicy == nil ||
+		vpa.ResourcePolicy.PodPolicy.Mode == nil {
+		return false
+	}
+	return *vpa.ResourcePolicy.PodPolicy.Mode == vpa_types.ContainerScalingModeAuto
 }
 
 func (writer *checkpointWriter) StoreCheckpoints(ctx context.Context, concurrentWorkers int) {
@@ -159,6 +172,23 @@ func buildAggregateContainerStateMap(vpa *model.Vpa, cluster model.ClusterState,
 	}
 	return aggregateContainerStateMap
 }
+
+// func buildAggregatePodStateMap(vpa *model.Vpa, cluster model.ClusterState, now time.Time) model.AggregateState {
+// 	aggregateContainerStateMap := vpa.AggregateState()
+// 	// Note: the memory peak from the current (ongoing) aggregation interval is not included in the
+// 	// checkpoint to avoid having multiple peaks in the same interval after the state is restored from
+// 	// the checkpoint. Therefore we are extracting the current peak from all containers.
+// 	// TODO: Avoid the nested loop over all containers for each VPA.
+// 	for _, pod := range cluster.Pods() {
+// 		aggregateKey := cluster.MakeAggregatePodStateKey(pod)
+// 		if vpa.UsesAggregation(aggregateKey) {
+// 			if aggregateContainerState, exists := aggregateContainerStateMap[containerName]; exists {
+// 				subtractCurrentContainerMemoryPeak(aggregateContainerState, container, now)
+// 			}
+// 		}
+// 	}
+// 	return aggregateContainerStateMap
+// }
 
 func subtractCurrentContainerMemoryPeak(a *model.AggregateContainerState, container *model.ContainerState, now time.Time) {
 	if now.Before(container.WindowEnd) {

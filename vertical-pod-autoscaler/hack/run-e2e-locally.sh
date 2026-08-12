@@ -82,10 +82,10 @@ fi
 # echo "Deleting KIND cluster 'kind'."
 # kind delete cluster -n kind -q
 
-if [ ! -f "${KIND_CONFIG}" ]; then
-  echo "Missing KIND config file: ${KIND_CONFIG}"
-  exit 1
-fi
+# if [ ! -f "${KIND_CONFIG}" ]; then
+#   echo "Missing KIND config file: ${KIND_CONFIG}"
+#   exit 1
+# fi
 
 # echo "Creating KIND cluster 'kind'"
 # if ! kind create cluster --config "${KIND_CONFIG}"; then

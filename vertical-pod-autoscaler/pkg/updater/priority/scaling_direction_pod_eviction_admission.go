@@ -46,6 +46,14 @@ func (s *scalingDirectionPodEvictionAdmission) Admit(pod *corev1.Pod, resources 
 	if !found {
 		return true
 	}
+
+	podRequests, _ := resourcehelpers.PodRequestsAndLimits(pod)
+	if pr := resources.PodRecommendations; pr != nil {
+		if podRequests == nil || s.admitAtPodLevel(podRequests, pr, podEvictionRequirements) {
+			return true
+		}
+	}
+
 	for _, container := range pod.Spec.Containers {
 		recommendedResources := vpa_utils.GetRecommendationForContainer(container.Name, resources)
 		// if a container doesn't have a recommendation, the VPA has set `.containerPolicy.mode: off` for this container,
@@ -61,6 +69,18 @@ func (s *scalingDirectionPodEvictionAdmission) Admit(pod *corev1.Pod, resources 
 	return false
 }
 
+func (s *scalingDirectionPodEvictionAdmission) admitAtPodLevel(podRequests corev1.ResourceList, podRecommendations *vpa_types.RecommendedPodLevelResources, podEvictionRequirements []*vpa_types.EvictionRequirement) bool {
+	_, foundCPURequests := podRequests[corev1.ResourceCPU]
+	if !foundCPURequests {
+		return true
+	}
+	_, foundMemoryRequests := podRequests[corev1.ResourceMemory]
+	if !foundMemoryRequests {
+		return true
+	}
+	return s.checkEvictionRequirements(podRequests, podRecommendations.Target, podEvictionRequirements)
+}
+
 func (s *scalingDirectionPodEvictionAdmission) admitContainer(containerRequests corev1.ResourceList, recommendedResources *vpa_types.RecommendedContainerResources, podEvictionRequirements []*vpa_types.EvictionRequirement) bool {
 	_, foundCPURequests := containerRequests[corev1.ResourceCPU]
 	if !foundCPURequests {
@@ -70,10 +90,10 @@ func (s *scalingDirectionPodEvictionAdmission) admitContainer(containerRequests 
 	if !foundMemoryRequests {
 		return true
 	}
-	return s.checkEvictionRequirementsForContainer(containerRequests, recommendedResources.Target, podEvictionRequirements)
+	return s.checkEvictionRequirements(containerRequests, recommendedResources.Target, podEvictionRequirements)
 }
 
-func (s *scalingDirectionPodEvictionAdmission) checkEvictionRequirementsForContainer(requestedResources corev1.ResourceList, recommendedResources corev1.ResourceList, evictionRequirements []*vpa_types.EvictionRequirement) bool {
+func (s *scalingDirectionPodEvictionAdmission) checkEvictionRequirements(requestedResources corev1.ResourceList, recommendedResources corev1.ResourceList, evictionRequirements []*vpa_types.EvictionRequirement) bool {
 	for _, requirement := range evictionRequirements {
 		var resultsForResources = []bool{}
 		for _, resource := range requirement.Resources {

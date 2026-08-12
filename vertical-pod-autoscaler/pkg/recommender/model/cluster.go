@@ -54,6 +54,7 @@ type ClusterState interface {
 	AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector) error
 	DeleteVpa(vpaID VpaID) error
 	MakeAggregateStateKey(pod *PodState, containerName string) AggregateStateKey
+	MakeAggregatePodStateKey(pod *PodState) AggregateStateKey
 	RateLimitedGarbageCollectAggregateCollectionStates(ctx context.Context, now time.Time, controllerFetcher controllerfetcher.ControllerFetcher)
 	RecordRecommendation(vpa *Vpa, now time.Time) error
 	GetMatchingPods(vpa *Vpa) []PodID
@@ -127,18 +128,8 @@ type PodState struct {
 	InitContainers []string
 	// PodPhase describing current life cycle phase of the Pod.
 	Phase corev1.PodPhase
-	// Start of the latest CPU usage sample that was aggregated.
-	LastCPUSampleStart time.Time
-	// Max memory usage observed in the current aggregation interval.
-	memoryPeak ResourceAmount
-	// Max memory usage estimated from an OOM event in the current aggregation interval.
-	oomPeak ResourceAmount
-	// End time of the current memory aggregation interval (not inclusive).
-	WindowEnd time.Time
-	// Start of the latest memory usage sample that was aggregated.
-	lastMemorySampleStart time.Time
-	// Aggregation to add usage samples to.
-	aggregator ContainerStateAggregator
+	// Pod-level Aggregation to add usage samples to.
+	podState *ContainerState
 }
 
 type PodSample struct {
@@ -149,7 +140,7 @@ type PodSample struct {
 
 // TODO (iamzili)
 func (pod *PodState) GetMemoryAggregationIntervalDuration() time.Duration {
-	return pod.aggregator.GetMemoryAggregationIntervalDuration()
+	return pod.podState.GetMemoryAggregationIntervalDuration()
 }
 
 // TODO (iamzili)
@@ -457,13 +448,13 @@ func (pod *PodState) RecordOOM(timestamp time.Time) error {
 // GetOOMBumpUpRatio returns the ratio to increase resources when OOM is detected.
 // It delegates to the aggregator's implementation.
 func (pod *PodState) GetOOMBumpUpRatio() float64 {
-	return pod.aggregator.GetOOMBumpUpRatio()
+	return pod.podState.GetOOMBumpUpRatio()
 }
 
 // GetOOMMinBumpUp returns the minimum amount to bump up resources when OOM is detected.
 // It delegates to the aggregator's implementation.
 func (pod *PodState) GetOOMMinBumpUp() float64 {
-	return pod.aggregator.GetOOMMinBumpUp()
+	return pod.podState.GetOOMMinBumpUp()
 }
 
 // AddOrUpdateVpa adds a new VPA with a given ID to the clusterState if it

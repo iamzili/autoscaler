@@ -62,7 +62,7 @@ case ${SUITE} in
     export KUBECONFIG=$HOME/.kube/config
     pushd ${SCRIPT_ROOT}/test/e2e
     go install github.com/onsi/ginkgo/v2/ginkgo
-    ${GOBIN}/ginkgo build v1/ && ${GOBIN}/ginkgo --nodes=$NUMPROC --focus="xxxx" v1/v1.test -- --report-dir=${ARTIFACTS} --disable-log-dump ${SKIP}
+    ${GOBIN}/ginkgo build v1/ && ${GOBIN}/ginkgo --nodes=$NUMPROC --focus="ZILI" v1/v1.test -- --report-dir=${ARTIFACTS} --disable-log-dump ${SKIP}
     V1_RESULT=$?
     popd
     echo v1 test result: ${V1_RESULT}
@@ -80,77 +80,3 @@ case ${SUITE} in
     ;;
 esac
 
-
-kubectl apply -f - <<EOF
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
-  name: workload1
-  namespace: default
-spec:
-  targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: workload1
-  updatePolicy:
-    updateMode: 'InPlaceOrRecreate'
-  resourcePolicy:
-    podPolicy:
-      mode: Auto
-EOF
-
-
-kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: workload1
-  namespace: default
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: workload1
-  template:
-    metadata:
-      labels:
-        app: workload1
-    spec:
-      containers:
-        - name: c1
-          image: gcr.io/k8s-staging-e2e-test-images/resource-consumer:1.9
-          args: ["-port=8080"]  
-          ports:  
-            - containerPort: 8080
-          resources:
-            requests:
-              memory: 100Mi
-            limits:
-              memory: 100Mi
-        - name: c2
-          image: gcr.io/k8s-staging-e2e-test-images/resource-consumer:1.9
-          args: ["-port=9090"]  
-          ports:  
-            - containerPort: 9090
-          #resources:
-          #   requests:
-          #     memory: 100Mi
-          #   limits:
-          #     memory: 100Mi
-EOF
-
-sleep 5
-
-POD_NAME=$(kubectl get pods -n "default" -l "app=workload1" -o jsonpath='{.items[0].metadata.name}')
-
-POD_IP=$(kubectl get pod "$POD_NAME" -n "default" -o jsonpath='{.status.podIP}')
-
-kubectl run -it --rm \
-    --image=curlimages/curl \
-    --restart=Never curly -- \
-    curl --data "millicores=80&durationSec=60000" http://"${POD_IP}":8080/ConsumeCPU
-
-kubectl run -it --rm \
-    --image=curlimages/curl \
-    --restart=Never curly1 -- \
-    curl --data "megabytes=80&durationSec=6000000" http://"${POD_IP}":8080/ConsumeMem

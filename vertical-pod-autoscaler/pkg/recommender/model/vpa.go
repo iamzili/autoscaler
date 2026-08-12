@@ -186,10 +186,9 @@ type Vpa struct {
 	// Access via thread-safe methods: UpdateRecommendation, HasRecommendation, GetRecommendation.
 	recommendation *vpa_types.RecommendedPodResources
 	// All container aggregations that contribute to this VPA.
+	// (iamzili): This map contains the pod level state as well, containerName = ""
 	// TODO: Garbage collect old AggregateContainerStates.
 	aggregateContainerStates aggregateContainerStatesMap
-	// TODO (iamzili)
-	aggregatePodLevelStates *AggregateContainerState
 	// Pod Resource Policy provided in the VPA API object. Can be nil.
 	ResourcePolicy *vpa_types.PodResourcePolicy
 	// Initial checkpoints of AggregateContainerStates for containers.
@@ -222,7 +221,6 @@ func NewVpa(id VpaID, selector labels.Selector, created time.Time) *Vpa {
 		ID:                              id,
 		PodSelector:                     selector,
 		aggregateContainerStates:        make(aggregateContainerStatesMap),
-		aggregatePodLevelStates:         nil,
 		ContainersInitialAggregateState: make(ContainerNameToAggregateStateMap),
 		Created:                         created,
 		Annotations:                     make(vpaAnnotationsMap),
@@ -266,12 +264,12 @@ func (vpa *Vpa) UseAggregationIfMatching(aggregationKey AggregateStateKey, aggre
 
 // TODO (iamzili)
 func (vpa *Vpa) UseAggregationIfMatchingPodLevel(aggregationKey AggregateStateKey, aggregation *AggregateContainerState) {
-	if vpa.aggregatePodLevelStates != nil {
+	if vpa.UsesAggregation(aggregationKey) {
 		// Already linked, we can return quickly.
 		return
 	}
 	if vpa.matchesAggregation(aggregationKey) {
-		vpa.aggregatePodLevelStates = aggregation
+		vpa.aggregateContainerStates[aggregationKey] = aggregation
 		aggregation.IsUnderVPA = true
 		aggregation.UpdateMode = vpa.UpdateMode
 		//aggregation.UpdateFromPolicy(vpa_api_util.GetContainerResourcePolicy(aggregationKey.ContainerName(), vpa.ResourcePolicy))
@@ -307,6 +305,12 @@ func (vpa *Vpa) UsesAggregation(aggregationKey AggregateStateKey) bool {
 	return exists
 }
 
+// // UsesAggregation returns true iff an aggregation with the given key contributes to the VPA.
+// func (vpa *Vpa) UsesAggregationPodLevel(aggregationKey AggregateStateKey) bool {
+// 	_, exists := vpa.aggregatePodLevelStates
+// 	return exists
+// }
+
 // DeleteAggregation deletes aggregation used by this container
 func (vpa *Vpa) DeleteAggregation(aggregationKey AggregateStateKey) {
 	state, ok := vpa.aggregateContainerStates[aggregationKey]
@@ -338,9 +342,14 @@ func (vpa *Vpa) AggregateStateByContainerName() ContainerNameToAggregateStateMap
 }
 
 // TODO (iamzili)
-func (vpa *Vpa) AggregateState() AggregateState {
+func (vpa *Vpa) AggregateState() *AggregateContainerState {
 	//vpa.MergeCheckpointedState(containerNameToAggregateStateMap)
-	return vpa.aggregatePodLevelStates
+	for k, v := range vpa.aggregateContainerStates {
+		if k.ContainerName() == "" {
+			return v
+		}
+	}
+	return nil
 }
 
 // HasRecommendation returns if the VPA object contains any recommendation

@@ -107,7 +107,7 @@ func (c *cappingRecommendationProcessor) Apply(
 		}
 		updatedRecommendations = append(updatedRecommendations, *updatedContainerResources)
 	}
-	return &vpa_types.RecommendedPodResources{ContainerRecommendations: updatedRecommendations}, containerToAnnotationsMap, nil
+	return &vpa_types.RecommendedPodResources{ContainerRecommendations: updatedRecommendations, PodRecommendations: podRecommendation.PodRecommendations}, containerToAnnotationsMap, nil
 }
 
 // getCappedRecommendationForContainer returns a recommendation for the given container, adjusted to obey policy and limits.

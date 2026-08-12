@@ -40,7 +40,7 @@ func GetContainerNameToAggregateStateMap(vpa *model.Vpa) model.ContainerNameToAg
 }
 
 // TODO (iamzili)
-func GetAggregateState(vpa *model.Vpa) model.AggregateState {
+func GetAggregateState(vpa *model.Vpa) *model.AggregateContainerState {
 	notFiltered := vpa.AggregateState()
 	// filteredContainerNameToAggregateStateMap := make(model.ContainerNameToAggregateStateMap)
 

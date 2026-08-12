@@ -195,10 +195,10 @@ func (r *recommender) RunOnce() {
 	r.UpdateVPAs()
 	timer.ObserveStep("UpdateVPAs")
 
-	// stepCtx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(r.checkpointsWriteTimeout))
-	// defer cancelFunc()
-	// r.MaintainCheckpoints(stepCtx)
-	// timer.ObserveStep("MaintainCheckpoints")
+	stepCtx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(r.checkpointsWriteTimeout))
+	defer cancelFunc()
+	r.MaintainCheckpoints(stepCtx)
+	timer.ObserveStep("MaintainCheckpoints")
 
 	// r.clusterState.RateLimitedGarbageCollectAggregateCollectionStates(ctx, time.Now(), r.controllerFetcher)
 	// timer.ObserveStep("GarbageCollect")

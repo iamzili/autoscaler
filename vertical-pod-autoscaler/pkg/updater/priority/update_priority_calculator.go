@@ -80,6 +80,8 @@ func (calc *UpdatePriorityCalculator) AddPod(pod *corev1.Pod, now time.Time, inf
 		klog.V(2).ErrorS(err, "Cannot process recommendation for pod", "pod", klog.KObj(pod))
 		return
 	}
+	// iamzili
+	processedRecommendation.ContainerRecommendations = nil
 
 	// Check if this recommendation was already tried and failed as infeasible
 	// only for InPlace update mode

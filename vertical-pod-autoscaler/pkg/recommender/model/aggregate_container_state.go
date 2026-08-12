@@ -54,8 +54,6 @@ import (
 // that aggregates state of containers with that name.
 type ContainerNameToAggregateStateMap map[string]*AggregateContainerState
 
-type AggregateState *AggregateContainerState
-
 const (
 	// SupportedCheckpointVersion is the tag of the supported version of serialized checkpoints.
 	// Version id should be incremented on every non incompatible change, i.e. if the new
