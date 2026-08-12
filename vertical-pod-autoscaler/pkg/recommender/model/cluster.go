@@ -145,70 +145,72 @@ func (pod *PodState) GetMemoryAggregationIntervalDuration() time.Duration {
 
 // TODO (iamzili)
 func (pod *PodState) GetMaxMemoryPeak() ResourceAmount {
-	return ResourceAmountMax(pod.memoryPeak, pod.oomPeak)
+	return pod.podState.GetMaxMemoryPeak()
 }
 
 func (pod *PodState) addCPUSample(sample *ContainerUsageSample) bool {
+	podState := pod.podState
 	// Order should not matter for the histogram, other than deduplication.
-	if !sample.isValid(ResourceCPU) || !sample.MeasureStart.After(pod.LastCPUSampleStart) {
-		klog.V(0).InfoS("Pod level sample discarded", "podName", pod.ID.PodName, "sample.MeasureStart", sample.MeasureStart, "pod.LastCPUSampleStart", pod.LastCPUSampleStart)
+	if !sample.isValid(ResourceCPU) || !sample.MeasureStart.After(podState.LastCPUSampleStart) {
+		klog.V(0).InfoS("Pod level sample discarded", "podName", pod.ID.PodName, "sample.MeasureStart", sample.MeasureStart, "pod.LastCPUSampleStart", podState.LastCPUSampleStart)
 		return false // Discard invalid, duplicate or out-of-order samples.
 	}
-	pod.aggregator.AddSample(sample)
-	pod.LastCPUSampleStart = sample.MeasureStart
+	podState.aggregator.AddSample(sample)
+	podState.LastCPUSampleStart = sample.MeasureStart
 	return true
 }
 
 func (pod *PodState) addMemorySample(sample *ContainerUsageSample, isOOM bool) bool {
+	podState := pod.podState
 	ts := sample.MeasureStart
 	// We always process OOM samples.
 	if !sample.isValid(ResourceMemory) ||
-		(!isOOM && ts.Before(pod.lastMemorySampleStart)) {
+		(!isOOM && ts.Before(podState.lastMemorySampleStart)) {
 		return false // Discard invalid or outdated samples.
 	}
-	pod.lastMemorySampleStart = ts
-	if pod.WindowEnd.IsZero() { // This is the first sample.
-		pod.WindowEnd = ts
+	podState.lastMemorySampleStart = ts
+	if podState.WindowEnd.IsZero() { // This is the first sample.
+		podState.WindowEnd = ts
 	}
 
-	// Each container aggregates one peak per aggregation interval. If the timestamp of the
+	// Each pod aggregates one peak per aggregation interval. If the timestamp of the
 	// current sample is earlier than the end of the current interval (WindowEnd) and is larger
 	// than the current peak, the peak is updated in the aggregation by subtracting the old value
 	// and adding the new value.
 	addNewPeak := false
-	if ts.Before(pod.WindowEnd) {
+	if ts.Before(podState.WindowEnd) {
 		oldMaxMem := pod.GetMaxMemoryPeak()
 		if oldMaxMem != 0 && sample.Usage > oldMaxMem {
 			// Remove the old peak.
 			oldPeak := ContainerUsageSample{
-				MeasureStart: pod.WindowEnd,
+				MeasureStart: podState.WindowEnd,
 				Usage:        oldMaxMem,
 				Resource:     ResourceMemory,
 			}
-			pod.aggregator.SubtractSample(&oldPeak)
+			podState.aggregator.SubtractSample(&oldPeak)
 			addNewPeak = true
 		}
 	} else {
 		// Shift the memory aggregation window to the next interval.
 		memoryAggregationIntervalDuration := pod.GetMemoryAggregationIntervalDuration()
-		shift := ts.Sub(pod.WindowEnd).Truncate(memoryAggregationIntervalDuration) + memoryAggregationIntervalDuration
-		pod.WindowEnd = pod.WindowEnd.Add(shift)
-		pod.memoryPeak = 0
-		pod.oomPeak = 0
+		shift := ts.Sub(podState.WindowEnd).Truncate(memoryAggregationIntervalDuration) + memoryAggregationIntervalDuration
+		podState.WindowEnd = podState.WindowEnd.Add(shift)
+		podState.memoryPeak = 0
+		podState.oomPeak = 0
 		addNewPeak = true
 	}
 	//container.observeQualityMetrics(sample.Usage, isOOM, corev1.ResourceMemory)
 	if addNewPeak {
 		newPeak := ContainerUsageSample{
-			MeasureStart: pod.WindowEnd,
+			MeasureStart: podState.WindowEnd,
 			Usage:        sample.Usage,
 			Resource:     ResourceMemory,
 		}
-		pod.aggregator.AddSample(&newPeak)
+		podState.aggregator.AddSample(&newPeak)
 		if isOOM {
-			pod.oomPeak = sample.Usage
+			podState.oomPeak = sample.Usage
 		} else {
-			pod.memoryPeak = sample.Usage
+			podState.memoryPeak = sample.Usage
 		}
 	}
 	return true
@@ -264,8 +266,11 @@ func (cluster *clusterState) AddOrUpdatePod(podID PodID, newLabels labels.Set, p
 	if !podExists || pod.labelSetKey != newlabelSetKey {
 		pod.labelSetKey = newlabelSetKey
 
-		// Set the links between the pod and the pod level aggregations based on the current pod labels
-		pod.aggregator = cluster.findOrCreateAggregatePodState(podID)
+		// Set the links between the pod and the pod level aggregation based on the current pod labels.
+		cluster.findOrCreateAggregatePodState(podID)
+		if pod.podState == nil {
+			pod.podState = NewContainerState(Resources{}, NewPodStateAggregatorProxy(cluster, podID))
+		}
 
 		// Set the links between the containers and aggregations based on the current pod labels.
 		for containerName, container := range pod.Containers {
@@ -425,14 +430,14 @@ func (pod *PodState) RecordOOM(timestamp time.Time) error {
 	// of the current aggregation interval and can sit up to a full interval ahead
 	// of the latest real sample, so using it here would wrongly drop a fresh OOM
 	// that landed just before an interval boundary (kubernetes/autoscaler#8548).
-	if !pod.lastMemorySampleStart.IsZero() &&
-		timestamp.Before(pod.lastMemorySampleStart.Add(-1*pod.GetMemoryAggregationIntervalDuration())) {
+	if !pod.podState.lastMemorySampleStart.IsZero() &&
+		timestamp.Before(pod.podState.lastMemorySampleStart.Add(-1*pod.GetMemoryAggregationIntervalDuration())) {
 		return fmt.Errorf("OOM event will be discarded - it is too old (%v)", timestamp)
 	}
 	//check the method description why this was commented out
-	//memoryUsed := ResourceAmountMax(requestedMemory, pod.memoryPeak)
-	memoryNeeded := ResourceAmountMax(pod.memoryPeak+MemoryAmountFromBytes(pod.GetOOMMinBumpUp()),
-		ScaleResource(pod.memoryPeak, pod.GetOOMBumpUpRatio()))
+	//memoryUsed := ResourceAmountMax(requestedMemory, pod.podState.memoryPeak)
+	memoryNeeded := ResourceAmountMax(pod.podState.memoryPeak+MemoryAmountFromBytes(pod.GetOOMMinBumpUp()),
+		ScaleResource(pod.podState.memoryPeak, pod.GetOOMBumpUpRatio()))
 
 	oomMemorySample := ContainerUsageSample{
 		MeasureStart: timestamp,

@@ -465,3 +465,71 @@ func (p *ContainerStateAggregatorProxy) GetMemoryAggregationIntervalDuration() t
 	aggregator := p.cluster.findOrCreateAggregateContainerState(p.containerID)
 	return aggregator.GetMemoryAggregationIntervalDuration()
 }
+
+// PodStateAggregatorProxy is a wrapper for ContainerStateAggregator that
+// creates the pod level ContainerStateAggregator if it is no longer present
+// in the cluster state.
+type PodStateAggregatorProxy struct {
+	podID   PodID
+	cluster *clusterState
+}
+
+// NewPodStateAggregatorProxy creates a PodStateAggregatorProxy pointing to the
+// cluster state.
+func NewPodStateAggregatorProxy(cluster *clusterState, podID PodID) ContainerStateAggregator {
+	return &PodStateAggregatorProxy{podID, cluster}
+}
+
+// AddSample adds a pod sample to the aggregator.
+func (p *PodStateAggregatorProxy) AddSample(sample *ContainerUsageSample) {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	aggregator.AddSample(sample)
+}
+
+// SubtractSample subtracts a pod sample from the aggregator.
+func (p *PodStateAggregatorProxy) SubtractSample(sample *ContainerUsageSample) {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	aggregator.SubtractSample(sample)
+}
+
+// GetLastRecommendation returns last recorded recommendation.
+func (p *PodStateAggregatorProxy) GetLastRecommendation() corev1.ResourceList {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.GetLastRecommendation()
+}
+
+// NeedsRecommendation returns true if the aggregator should have recommendation calculated.
+func (p *PodStateAggregatorProxy) NeedsRecommendation() bool {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.NeedsRecommendation()
+}
+
+// GetUpdateMode returns update mode of VPA controlling the aggregator.
+func (p *PodStateAggregatorProxy) GetUpdateMode() *vpa_types.UpdateMode {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.GetUpdateMode()
+}
+
+// GetScalingMode returns scaling mode of the pod represented by the aggregator.
+func (p *PodStateAggregatorProxy) GetScalingMode() *vpa_types.ContainerScalingMode {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.GetScalingMode()
+}
+
+// GetOOMMinBumpUp returns the minimum amount to bump up resources when OOM is detected.
+func (p *PodStateAggregatorProxy) GetOOMMinBumpUp() float64 {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.GetOOMMinBumpUp()
+}
+
+// GetOOMBumpUpRatio returns the ratio to increase resources when OOM is detected.
+func (p *PodStateAggregatorProxy) GetOOMBumpUpRatio() float64 {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.GetOOMBumpUpRatio()
+}
+
+// GetMemoryAggregationIntervalDuration returns the memory aggregation interval from the underlying aggregate pod state.
+func (p *PodStateAggregatorProxy) GetMemoryAggregationIntervalDuration() time.Duration {
+	aggregator := p.cluster.findOrCreateAggregatePodState(p.podID)
+	return aggregator.GetMemoryAggregationIntervalDuration()
+}
